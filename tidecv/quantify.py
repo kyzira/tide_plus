@@ -29,7 +29,7 @@ class TIDEExample:
 		preds    = self.preds
 		gt       = self.gt
 		ignore   = self.ignore_regions
-		det_type = 'bbox' if self.mode == TIDE.BOX else 'mask'
+		det_type = 'bbox' if self.mode == 'bbox' else 'mask'
 		max_dets = self.max_dets
 
 		if len(preds) == 0:
@@ -132,13 +132,15 @@ class TIDERun:
 
 	# Temporary variables stored in ground truth that we need to clear after a run
 	_temp_vars = ['best_score', 'best_id', 'used', 'matched_with', '_idx', 'usable']
+	
 
 	def __init__(self, gt:Data, preds:Data, pos_thresh:float, bg_thresh:float, mode:str, max_dets:int, run_errors:bool=True):
 		self.gt     = gt
 		self.preds  = preds
 
+		self._error_types = [ClassError, BoxError, OtherError, DuplicateError, BackgroundError, MissedError]
 		self.errors     = []
-		self.error_dict = {_type: [] for _type in TIDE._error_types}
+		self.error_dict = {_type: [] for _type in self._error_types}
 		self.ap_data = ClassedAPDataObject()
 		self.qualifiers = {}
 
@@ -338,7 +340,7 @@ class TIDERun:
 			qual = Qualifier('', None)
 
 		if error_types is None:
-			error_types = TIDE._error_types
+			error_types = self._error_types
 
 		errors = {}
 
@@ -370,7 +372,7 @@ class TIDERun:
 		counts = {}
 
 		if error_types is None:
-			error_types = TIDE._error_types
+			error_types = self._error_types
 
 		for error in error_types:
 			if qual is None:
@@ -402,233 +404,5 @@ class TIDERun:
 		
 
 
-class TIDE:
-	"""
-	████████╗██╗██████╗ ███████╗
-	╚══██╔══╝██║██╔══██╗██╔════╝
-	   ██║   ██║██║  ██║█████╗  
-	   ██║   ██║██║  ██║██╔══╝  
-	   ██║   ██║██████╔╝███████╗
-	   ╚═╝   ╚═╝╚═════╝ ╚══════╝
-   """
-
-
-	# This is just here to define a consistent order of the error types
-	_error_types = [ClassError, BoxError, OtherError, DuplicateError, BackgroundError, MissedError]
-	_special_error_types = [FalsePositiveError, FalseNegativeError]
-
-	# Threshold splits for different challenges
-	COCO_THRESHOLDS = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
-	VOL_THRESHOLDS  = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9] 
-
-	# The modes of evaluation
-	BOX  = 'bbox'
-	MASK = 'mask'
-
-	def __init__(self, pos_threshold:float=0.5, background_threshold:float=0.1, mode:str=BOX):
-		self.pos_thresh = pos_threshold
-		self.bg_thresh  = background_threshold
-		self.mode       = mode
-
-		self.pos_thresh_int = int(self.pos_thresh * 100)
-
-		self.runs = {}
-		self.run_thresholds = {}
-		self.run_main_errors = {}
-		self.run_special_errors = {}
-
-		self.qualifiers = OrderedDict()
-
-		self.plotter = P.Plotter()
-
-
-	def evaluate(self, gt:Data, preds:Data, pos_threshold:float=None, background_threshold:float=None,
-					   mode:str=None, name:str=None, use_for_errors:bool=True) -> TIDERun:
-		pos_thresh = self.pos_thresh if pos_threshold        is None else pos_threshold
-		bg_thresh  = self.bg_thresh  if background_threshold is None else background_threshold
-		mode       = self.mode       if mode                 is None else mode
-		name       = preds.name      if name                 is None else name
-
-		run = TIDERun(gt, preds, pos_thresh, bg_thresh, mode, gt.max_dets, use_for_errors)
-
-		if use_for_errors:
-			self.runs[name] = run
-		
-		return run
-
-	def evaluate_range(self, gt:Data, preds:Data, thresholds:list=COCO_THRESHOLDS, pos_threshold:float=None,
-							background_threshold:float=None, mode:str=None, name:str=None) -> dict:
-
-		if pos_threshold is None: pos_threshold = self.pos_thresh
-		if name          is None: name          = preds.name
-
-		self.run_thresholds[name] = []
-
-		for thresh in thresholds:
-			
-			run = self.evaluate(gt, preds, pos_threshold=thresh, background_threshold=background_threshold,
-				mode=mode, name=name, use_for_errors=(pos_threshold == thresh))
-			
-			self.run_thresholds[name].append(run)
-
-	def add_qualifiers(self, *quals):
-		"""
-		Applies any number of Qualifier objects to evaluations that have been run up to now.
-		See qualifiers.py for examples.
-		"""
-		raise NotImplementedError('Qualifiers coming soon.')
-		# for q in quals:
-		# 	for run_name, run in self.runs.items():
-		# 		if run_name in self.run_thresholds:
-		# 			# If this was a threshold run, apply the qualifier for every run
-		# 			for trun in self.run_thresholds[run_name]:
-		# 				trun.apply_qualifier(q)
-		# 		else:
-		# 			# If this had no threshold, just apply it to the main run
-		# 			run.apply_qualifier(q)
-		
-		# 	self.qualifiers[q.name] = q
-	
-	def summarize(self):
-		""" Summarizes the mAP values and errors for all runs in this TIDE object. Results are printed to the console. """
-		main_errors    = self.get_main_errors()
-		special_errors = self.get_special_errors()
-
-		for run_name, run in self.runs.items():
-			print('-- {} --\n'.format(run_name))
-
-			# If we evaluated on all thresholds, print them here
-			if run_name in self.run_thresholds:
-				thresh_runs = self.run_thresholds[run_name]
-				aps = [trun.ap for trun in thresh_runs]
-
-				# Print Overall AP for a threshold run
-				ap_title = '{} AP @ [{:d}-{:d}]'.format(thresh_runs[0].mode, 
-					int(thresh_runs[0].pos_thresh*100), int(thresh_runs[-1].pos_thresh*100))
-				print('{:s}: {:.2f}'.format(ap_title, sum(aps)/len(aps)))
-
-				# Print AP for every threshold on a threshold run
-				P.print_table([
-					['Thresh'] + [str(int(trun.pos_thresh*100)) for trun in thresh_runs],
-					['  AP  '] + ['{:6.2f}'.format(trun.ap) for trun in thresh_runs]
-				], title=ap_title)
-
-				# Print qualifiers for a threshold run
-				if len(self.qualifiers) > 0:
-					print()
-					# Can someone ban me from using list comprehension? this is unreadable
-					qAPs = [
-						f.mean(
-							[trun.qualifiers[q] for trun in thresh_runs if q in trun.qualifiers]
-						) for q in self.qualifiers
-					]
-
-					P.print_table([
-						['Name'] + list(self.qualifiers.keys()),
-						[' AP '] + ['{:6.2f}'.format(qAP) for qAP in qAPs]
-					], title='Qualifiers {}'.format(ap_title))
-
-			# Otherwise, print just the one run we did
-			else:
-				# Print Overall AP for a regular run
-				ap_title = '{} AP @ {:d}'.format(run.mode, int(run.pos_thresh*100))
-				print('{}: {:.2f}'.format(ap_title, run.ap))
-
-				# Print qualifiers for a regular run
-				if len(self.qualifiers) > 0:
-					print()
-					qAPs = [run.qualifiers[q] if q in run.qualifiers else 0 for q in self.qualifiers]
-					P.print_table([
-						['Name'] + list(self.qualifiers.keys()),
-						[' AP '] + ['{:6.2f}'.format(qAP) for qAP in qAPs]
-					], title='Qualifiers {}'.format(ap_title))
-			
-
-
-			print()
-			# Print the main errors
-			P.print_table([
-				['Type'] + [err.short_name for err in TIDE._error_types],
-				[' dAP'] + ['{:6.2f}'.format(main_errors[run_name][err.short_name]) for err in TIDE._error_types]
-			], title='Main Errors')
-
-			
-				
-			print()
-			# Print the special errors
-			P.print_table([
-				['Type'] + [err.short_name for err in TIDE._special_error_types],
-				[' dAP'] + ['{:6.2f}'.format(special_errors[run_name][err.short_name]) for err in TIDE._special_error_types]
-			], title='Special Error')
-			
-			print()
-
-	def plot(self, out_dir:str=None):
-		"""
-		Plots a summary model for each run in this TIDE object.
-		Images will be outputted to out_dir, which will be created if it doesn't exist.
-		"""
-		
-		if out_dir is not None:
-			if not os.path.exists(out_dir):
-				os.makedirs(out_dir)
-		
-		errors = self.get_all_errors()
-
-		max_main_error = max(sum([list(x.values()) for x in errors['main'].values()], []))
-		max_spec_error = max(sum([list(x.values()) for x in errors['special'].values()], []))
-		dap_granularity = 5 # The max will round up to the nearest unit of this
-
-		# Round the plotter's dAP range up to the nearest granularity units
-		if max_main_error > self.plotter.MAX_MAIN_DELTA_AP:
-			self.plotter.MAX_MAIN_DELTA_AP = math.ceil(max_main_error / dap_granularity) * dap_granularity
-		if max_spec_error > self.plotter.MAX_SPECIAL_DELTA_AP:
-			self.plotter.MAX_SPECIAL_DELTA_AP = math.ceil(max_spec_error / dap_granularity) * dap_granularity
-
-		# Do the plotting now
-		for run_name, run in self.runs.items():
-			self.plotter.make_summary_plot(out_dir, errors, run_name, run.mode, hbar_names=True)
-
-
-
-	def get_main_errors(self):
-		errors = {}
-
-		for run_name, run in self.runs.items():
-			if run_name in self.run_main_errors:
-				errors[run_name] = self.run_main_errors[run_name]
-			else:
-				errors[run_name] = {
-					error.short_name: value
-						for error, value in run.fix_main_errors().items()
-				}
-		
-		return errors
-
-	def get_special_errors(self):
-		errors = {}
-
-		for run_name, run in self.runs.items():
-			if run_name in self.run_special_errors:
-				errors[run_name] = self.run_special_errors[run_name]
-			else:
-				errors[run_name] = {
-					error.short_name: value
-						for error, value in run.fix_special_errors().items()
-				}
-		
-		return errors
-	
-	def get_all_errors(self):
-		"""
-		returns {
-			'main'   : { run_name: { error_name: float } },
-			'special': { run_name: { error_name: float } },
-		}
-		"""
-		return {
-			'main': self.get_main_errors(),
-			'special': self.get_special_errors()
-		}
 
 

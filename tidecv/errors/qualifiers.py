@@ -3,7 +3,24 @@
 
 
 def _area(x):
-	return x['bbox'][2] * x['bbox'][3]
+	if x is None:
+		return 0
+	# Wenn bbox vorhanden ist
+	if x.get('bbox') is not None:
+		b = x['bbox']
+		return b[2] * b[3]
+	# Wenn Maske vorhanden ist (z. B. bei Segmentation)
+	if x.get('mask') is not None:
+		import pycocotools.mask as mask_utils
+		rle = x['mask']
+		if rle is None:
+			return 0
+		try:
+			return mask_utils.area(rle)
+		except Exception:
+			return 0
+	# Standardwert
+	return 0
 
 def _ar(x):
 	return x['bbox'][2] / x['bbox'][3]
