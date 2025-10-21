@@ -2,6 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import json
 import os, sys
+import seaborn as sns
+
 
 def plot(d, out_dir: str):
 	if not os.path.exists(out_dir):
@@ -150,9 +152,66 @@ def plot(d, out_dir: str):
 		plt.savefig(os.path.join(plots_path, "Recall_comparison.png"))
 		plt.close()
 
+	# --- 7. Confusion Matrices ---
+	confusion_data = {}
+	for run_name, data in d.items():
+		if "confusion_matrix" in data and "class_labels" in data:
+			confusion_data[run_name] = {
+				"cm": np.array(data["confusion_matrix"]),
+				"labels": data["class_labels"]
+			}
+
+	if len(confusion_data) > 0:
+		for model, cm_data in confusion_data.items():
+			cm = cm_data["cm"]
+			labels = cm_data["labels"]
+
+			plt.figure(figsize=(8, 6))
+			sns.heatmap(cm, annot=True, fmt=".2f", cmap="Blues",
+						xticklabels=labels, yticklabels=labels, cbar=True)
+			plt.title(f"Normalized Confusion Matrix ({model})")
+			plt.xlabel("Predicted class")
+			plt.ylabel("True class")
+			plt.tight_layout()
+			plt.savefig(os.path.join(plots_path, f"{model}_confusion_matrix.png"))
+			plt.close()
+
 	print(f"Plots saved!")
 
+def print_table(rows:list, title:str=None):
+	# Convert all elements to strings to avoid len() errors on floats or None
+	rows = [[str(cell) for cell in row] for row in rows]
 
+	# Get all rows to have the same number of columns
+	max_cols = max([len(row) for row in rows])
+	for row in rows:
+		while len(row) < max_cols:
+			row.append('')
+
+	# Compute the text width of each column
+	try:
+		col_widths = [max([len(rows[i][col_idx]) for i in range(len(rows))]) for col_idx in range(len(rows[0]))]
+	except Exception as e:
+		print("Error computing column widths:", e)
+		print("Rows were:")
+		for row in rows:
+			print(row)
+		return
+
+	divider = '--' + ('---'.join(['-' * w for w in col_widths])) + '-'
+	thick_divider = divider.replace('-', '=')
+
+	if title:
+		left_pad = (len(divider) - len(title)) // 2
+		print(('{:>%ds}' % (left_pad + len(title))).format(title))
+
+	print(thick_divider)
+	for row in rows:
+		print('  ' + '   '.join([('{:>%ds}' % col_widths[col_idx]).format(row[col_idx]) for col_idx in range(len(row))]) + '  ')
+		if row == rows[0]:
+			print(divider)
+	print(thick_divider)
+	
 def mean(arr:list):
 	if len(arr) == 0:
 		return 0

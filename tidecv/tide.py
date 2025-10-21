@@ -5,7 +5,7 @@ from collections import OrderedDict
 from .quantify import TIDERun
 import os
 from .errors.qualifiers import Qualifier, AREA
-from . import plotting as P
+import numpy as np
 
 class TIDE:
 	"""
@@ -57,11 +57,11 @@ class TIDE:
 
 				run_summary['Threshold AP @'] = {}
 				for trun in thresh_runs:
-					run_summary['Threshold AP @'][str(int(trun.pos_thresh*100))] = '{:6.2f}'.format(trun.ap)
+					run_summary['Threshold AP @'][str(int(trun.pos_thresh*100))] = round(trun.ap, 2)
 
 				# --- Precision / Recall (gesamt) ---
-			run_summary["Precision"] = {"Average": '{:6.2f}'.format(run.ap_data.get_precision() * 100)}
-			run_summary["Recall"] = {"Average": '{:6.2f}'.format(run.ap_data.get_recall() * 100)}
+			run_summary["Precision"] = {"Average": round(run.ap_data.get_precision() * 100, 2)}
+			run_summary["Recall"] = {"Average": round(run.ap_data.get_recall() * 100, 2)}
 
 			# --- AP / AR für Small, Medium, Large ---
 			size_quals = {
@@ -72,28 +72,28 @@ class TIDE:
 
 			for size_name, qual in size_quals.items():
 				ap_data = run.apply_qualifier(qual)
-				run_summary["Precision"][f"AP ({size_name})"] = '{:6.2f}'.format(ap_data.get_mAP())
-				run_summary["Recall"][f"AR ({size_name})"] = '{:6.2f}'.format(ap_data.get_recall() * 100)
+				run_summary["Precision"][f"AP ({size_name})"] = round(ap_data.get_mAP(), 2)
+				run_summary["Recall"][f"AR ({size_name})"] = round(ap_data.get_recall() * 100, 2)
 
 			run_summary["Main Errors"] = {}
 			for err in self._error_types:
 				key = err.short_name if hasattr(err, "short_name") else str(err)
 				if key in main_errors[run_name]:
-					run_summary["Main Errors"][key] = '{:6.2f}'.format(main_errors[run_name][key])
+					run_summary["Main Errors"][key] = round(main_errors[run_name][key], 2)
 				else:
-					run_summary["Main Errors"][key] = '{:6.2f}'.format(0.0)
+					run_summary["Main Errors"][key] = 0.0
 
 			run_summary["Special Errors"] = {}
 			for err in self._special_error_types:
 				key = err.short_name if hasattr(err, "short_name") else str(err)
 				if key in special_errors[run_name]:
-					run_summary["Special Errors"][key] = '{:6.2f}'.format(special_errors[run_name][key])
+					run_summary["Special Errors"][key] = round(special_errors[run_name][key], 2)
 				else:
-					run_summary["Special Errors"][key] = '{:6.2f}'.format(0.0)
+					run_summary["Special Errors"][key] = 0.0
 
 
 			
-			self.summary[run_name] = run_summary
+			self.summary[run_name] = run_summary.copy()
 
 	def __evaluate_run(self, gt:Data, preds:Data, pos_threshold:float=None, background_threshold:float=None,
 					   mode:str=None, name:str=None, use_for_errors:bool=True) -> TIDERun:
@@ -108,6 +108,46 @@ class TIDE:
 			self.runs[name] = run
 		
 		return run
+	
+	def average_out_confusion_matrices(self):
+		cms = [run.confusion_matrix for run in self.runs.values() if hasattr(run, "confusion_matrix")]
+		if len(cms) == 0:
+			return None
+		avg_cm = np.mean(cms, axis=0)
+		self.avg_confusion_matrix = avg_cm
+		return avg_cm
+
+	def average_out_summary(self):
+		all_summary = self.get_summary()
+		averaged_summary = {}
+
+		for summary in all_summary.values():
+			for category_name, category_value in summary.items():
+				if isinstance(category_value, float):
+					if category_name not in averaged_summary:
+						averaged_summary[category_name] = 0.0
+					averaged_summary[category_name] += float(category_value)
+				elif isinstance(category_value, dict):
+					if category_name not in averaged_summary:
+						averaged_summary[category_name] = {name: 0.0 for name in category_value.keys()}
+					for name, value in category_value.items():
+						averaged_summary[category_name][name] += float(value)
+				else:
+					print("Type Mismatch! Can not average out the summaries.")
+					break
+		
+		div_factor = len(all_summary.values())
+
+		for category_name, category_value in averaged_summary.items():
+			if isinstance(category_value, float):
+				averaged_summary[category_name] = round(float(averaged_summary[category_name]) / div_factor, 2)
+			elif isinstance(category_value, dict):
+				for name, value in category_value.items():
+					averaged_summary[category_name][name] = round(float(averaged_summary[category_name][name]) / div_factor, 2)
+			else:
+				print("Type Mismatch! Can not average out the summaries.")
+
+		self.summary["Combined Average"] = averaged_summary.copy()
 
 	def evaluate(self, gt:Data, preds:Data, mode:str=None, name:str=None):
 		"""
@@ -127,7 +167,7 @@ class TIDE:
 		
 		self.__calculate_summary()
 
-	def evaluate_multiple(self, gt:Data, preds_list:list, mode:str=None, names:list[str]=None):
+	def evaluate_multiple_models(self, gt:Data, preds_list:list, mode:str=None, names:list[str]=None):
 		"""
 		Evaluate multiple prediction sets against a ground truth set.
 		preds_list: List of Data objects containing predictions
@@ -143,6 +183,28 @@ class TIDE:
 		
 		self.__calculate_summary()
 	
+	def evaluate_model_on_multiple_gt(self, gt_list:list[Data], preds_list:list[Data], mode=None, names:list[str]=None):
+		"""
+		Evaluate prediction against multiple ground truth set.
+		preds_list: List of Data objects containing predictions on multiple GTs
+		gt_list: 	List of Data objects containing the GTs for the corresponding predictions
+		mode: 	 	Evaluation mode (box or mask), Either str or list of str
+		names:      List of names for the prediction sets. If None, will use preds.name
+		"""
+		if names is None:
+			names = [preds.name for preds in preds_list]
+		elif len(names) != len(preds_list):
+			raise ValueError("Length of names must match length of preds_list")
+		
+		if isinstance(mode, str):
+			mode = [mode] * len(preds_list)
+		
+		for gt_counter, (gt, preds, name, mode_type) in enumerate(zip(gt_list, preds_list, names, mode)):
+			run_name = name + f"_GT_num_{gt_counter}"
+			self.evaluate(gt, preds, mode=mode_type, name=run_name)
+		
+		self.__calculate_summary()
+		self.average_out_summary()
 
 	def get_summary(self) -> dict:
 		"""
@@ -163,6 +225,23 @@ class TIDE:
 		Saves a summary of the mAP values and errors for all runs in this TIDE object to out_path as a JSON file.
 		"""
 		f.save_json(self.get_summary(), out_path)
+		# Zusätzlich: Speichere alle Confusion-Matrizen separat
+		cm_out = {}
+		for run_name, run in self.runs.items():
+			if hasattr(run, "confusion_matrix"):
+				cm_out[run_name] = {
+					"labels": run.class_labels,
+					"matrix": run.confusion_matrix.tolist()
+				}
+
+		if hasattr(self, "avg_confusion_matrix"):
+			cm_out["Combined Average"] = {
+				"labels": list(self.runs.values())[0].class_labels,
+				"matrix": self.avg_confusion_matrix.tolist()
+			}
+
+		f.save_json(cm_out, out_path.replace(".json", "_confusion_matrices.json"))
+
 
 	def print_summary(self):
 		for run_name, run_summary in self.summary.items():
@@ -177,7 +256,7 @@ class TIDE:
 				thresholds = list(run_summary['Threshold AP @'].keys())
 				values = list(run_summary['Threshold AP @'].values())
 
-				P.print_table([
+				f.print_table([
 					['Thresh'] + thresholds,
 					['  AP  '] + values
 				], title='Threshold AP @')
@@ -187,7 +266,7 @@ class TIDE:
 				err_types = list(run_summary['Main Errors'].keys())
 				err_vals = list(run_summary['Main Errors'].values())
 
-				P.print_table([
+				f.print_table([
 					['Type'] + [e.short_name if hasattr(e, "short_name") else str(e) for e in err_types],
 					[' dAP'] + err_vals
 				], title='Main Errors')
@@ -197,7 +276,7 @@ class TIDE:
 				spec_types = list(run_summary['Special Errors'].keys())
 				spec_vals = list(run_summary['Special Errors'].values())
 
-				P.print_table([
+				f.print_table([
 					['Type'] + [e.short_name if hasattr(e, "short_name") else str(e) for e in spec_types],
 					[' dAP'] + spec_vals
 				], title='Special Errors')
@@ -211,6 +290,13 @@ class TIDE:
 
 			print()
 
+	def print_confusion_matrices(self):
+		for run_name, run in self.runs.items():
+			if hasattr(run, "confusion_matrix"):
+				print(f"\nConfusion Matrix ({run_name}):")
+				print(run.class_labels)
+				print(np.round(run.confusion_matrix, 2))
+
 
 	def plot(self, out_dir:str=None):
 		"""
@@ -221,7 +307,7 @@ class TIDE:
 			out_dir = os.path.join(os.getcwd())
 		
 		f.plot(self.summary, out_dir)
-		
+	
 
 
 	def get_main_errors(self):
@@ -236,7 +322,7 @@ class TIDE:
 						for error, value in run.fix_main_errors().items()
 				}
 		
-		return errors
+		return errors.copy()
 
 	def get_special_errors(self):
 		errors = {}
@@ -250,7 +336,7 @@ class TIDE:
 						for error, value in run.fix_special_errors().items()
 				}
 		
-		return errors
+		return errors.copy()
 	
 	def get_all_errors(self):
 		"""

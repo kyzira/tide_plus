@@ -1,8 +1,6 @@
 
 from collections import defaultdict, OrderedDict
 import os
-import shutil
-
 import cv2
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
@@ -13,34 +11,6 @@ import seaborn as sns
 
 from .errors.main_errors import *
 from .datasets import get_tide_path
-
-
-
-def print_table(rows:list, title:str=None):
-	# Get all rows to have the same number of columns
-	max_cols = max([len(row) for row in rows])
-	for row in rows:
-		while len(row) < max_cols:
-			row.append('')
-
-	# Compute the text width of each column
-	col_widths = [max([len(rows[i][col_idx]) for i in range(len(rows))]) for col_idx in range(len(rows[0]))]
-
-	divider = '--' + ('---'.join(['-' * w for w in col_widths])) + '-'
-	thick_divider = divider.replace('-', '=')
-
-	if title:
-		left_pad = (len(divider) - len(title)) // 2
-		print(('{:>%ds}' % (left_pad + len(title))).format(title))
-
-	print(thick_divider)
-	for row in rows:
-		# Print each row while padding to each column's text width
-		print('  ' + '   '.join([('{:>%ds}' % col_widths[col_idx]).format(row[col_idx]) for col_idx in range(len(row))]) + '  ')
-		if row == rows[0]: print(divider)
-	print(thick_divider)
-
-
 
 
 class Plotter():
@@ -196,6 +166,34 @@ class Plotter():
 			
 		summary_im = np.concatenate([pie_im, summary_im], axis=0)
 		
+		# -------------------------------------------------------------
+        # Confusion Matrix Plot
+        # -------------------------------------------------------------
+
+		# Falls das Run-Objekt eine Confusion-Matrix enthält
+		if hasattr(self, "tide_obj") and model_name in self.tide_obj.runs:
+			run = self.tide_obj.runs[model_name]
+			if hasattr(run, "confusion_matrix"):
+				cm = run.confusion_matrix
+				labels = run.class_labels
+
+				fig_cm, ax_cm = plt.subplots(figsize=(8, 6))
+				sns.heatmap(cm, annot=True, fmt=".2f", cmap="Blues",
+							xticklabels=labels, yticklabels=labels, cbar=True, ax=ax_cm)
+				ax_cm.set_title(f"Normalized Confusion Matrix ({model_name})")
+				ax_cm.set_xlabel("Predicted class")
+				ax_cm.set_ylabel("True class")
+				plt.tight_layout()
+
+				# Wenn interaktiv angezeigt werden soll
+				if out_dir is None:
+					plt.show()
+				else:
+					plt.savefig(os.path.join(out_dir, f"{model_name}_confusion_matrix.png"))
+				plt.close(fig_cm)
+
+
+
 		if out_dir is None:
 			fig = plt.figure()
 			ax = plt.axes([0,0,1,1])

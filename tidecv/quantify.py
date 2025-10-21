@@ -3,13 +3,11 @@ from .ap import ClassedAPDataObject
 from .errors.main_errors import *
 from .errors.qualifiers import Qualifier, AREA
 from . import functions as f
-from . import plotting as P
-
+from sklearn.metrics import confusion_matrix
 from pycocotools import mask as mask_utils
 from collections import defaultdict, OrderedDict
 import numpy as np
 from typing import Union
-import os, math
 
 class TIDEExample:
 	""" Computes all the data needed to evaluate a set of predictions and gt for a single image. """
@@ -24,7 +22,7 @@ class TIDEExample:
 		self.run_errors = run_errors
 
 		self._run()
-	
+
 	def _run(self):
 		preds    = self.preds
 		gt       = self.gt
@@ -155,6 +153,33 @@ class TIDERun:
 
 		self._run()
 
+	def _compute_confusion_matrix(self):
+		y_true, y_pred = [], []
+		gt_lookup = {g['_id']: g for g in self.gt.annotations}
+
+		for pred in self.preds.annotations:
+			if pred.get('used') is True:
+				gt = gt_lookup.get(pred.get('matched_with'))
+				if gt:
+					y_true.append(gt['class'])
+					y_pred.append(pred['class'])
+			elif pred.get('used') is False:
+				y_true.append(-1)
+				y_pred.append(pred['class'])
+
+		for gt in self.gt.annotations:
+			if not gt['ignore'] and not gt.get('used', False):
+				y_true.append(gt['class'])
+				y_pred.append(-1)
+
+		if not y_true or not y_pred:
+			return
+
+		classes = sorted(list(self.gt.classes.keys()))
+		cm = confusion_matrix(y_true, y_pred, labels=classes, normalize='true')
+		self.confusion_matrix = cm
+		self.class_labels = classes
+
 
 	def _run(self):
 		""" And awaaay we go """
@@ -179,19 +204,21 @@ class TIDERun:
 			error.disabled = False
 		
 		self.ap = self.ap_data.get_mAP()
-
-		# Now that we've stored the fixed errors, we can clear the gt info
+		self._compute_confusion_matrix()
 		self._clear()
 
-
-
-
 	def _clear(self):
-		""" Clears the ground truth so that it's ready for another run. """
+		"""Clears the ground truth and predictions so that they're ready for another run."""
 		for gt in self.gt.annotations:
 			for var in self._temp_vars:
 				if var in gt:
 					del gt[var]
+
+		for pred in self.preds.annotations:
+			for var in self._temp_vars + ['iou', 'info']:
+				if var in pred:
+					del pred[var]
+
 
 	def _add_error(self, error):
 		self.errors.append(error)
