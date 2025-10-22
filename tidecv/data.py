@@ -27,7 +27,6 @@ class Data():
 		# Maps an image id to an image name and a list of annotation ids
 		self.images      = defaultdict(lambda: {'name': None, 'anns': []})
 
-
 	def _get_ignored_classes(self, image_id:int) -> set:
 		anns = self.get(image_id)
 
@@ -103,6 +102,21 @@ class Data():
 	def add_image(self, id:int, name:str):
 		""" Register an image name/path with an image ID. """
 		self.images[id]['name'] = name
+
+	def has_masks(self) -> bool:
+		"""Returns True only if there is at least one valid COCO-style or polygon mask."""
+		for ann in self.annotations:
+			m = ann.get('mask', None)
+			if m is None:
+				continue
+			if not m:
+				continue
+			if isinstance(m, dict) and m.get("counts", False) and m.get('size', False):
+				if len(m.get("counts", None)) != 0:
+					return True
+				return True
+		return False
+
 
 
 	def get(self, image_id:int):

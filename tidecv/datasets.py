@@ -119,8 +119,8 @@ def COCOResult(path:str, name:str=None) -> Data:
 		image = det['image_id']
 		_cls  = det['category_id']
 		score = det['score']
-		box   = det['bbox']         if 'bbox'         in det else None
-		mask  = det['segmentation'] if 'segmentation' in det else None
+		box   = det['bbox']         if 'bbox'         in det else list()
+		mask  = det['segmentation'] if 'segmentation' in det else dict()
 
 		data.add_detection(image, _cls, score, box, mask)
 	

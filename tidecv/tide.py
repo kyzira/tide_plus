@@ -22,8 +22,9 @@ class TIDE:
 	# The modes of evaluation
 	BOX  = 'bbox'
 	MASK = 'mask'
+	AUTO = 'auto'
 
-	def __init__(self, pos_threshold:float=0.5, background_threshold:float=0.1, mode:str=BOX):
+	def __init__(self, pos_threshold:float=0.5, background_threshold:float=0.1, mode:str=AUTO):
 		self.pos_thresh = pos_threshold
 		self.bg_thresh  = background_threshold
 		self.mode       = mode
@@ -96,11 +97,17 @@ class TIDE:
 			self.summary[run_name] = run_summary.copy()
 
 	def __evaluate_run(self, gt:Data, preds:Data, pos_threshold:float=None, background_threshold:float=None,
-					   mode:str=None, name:str=None, use_for_errors:bool=True) -> TIDERun:
+					   mode:str=AUTO, name:str=None, use_for_errors:bool=True) -> TIDERun:
 		pos_thresh = self.pos_thresh if pos_threshold        is None else pos_threshold
 		bg_thresh  = self.bg_thresh  if background_threshold is None else background_threshold
 		mode       = self.mode       if mode                 is None else mode
 		name       = preds.name      if name                 is None else name
+
+		if mode == TIDE.AUTO:
+			if gt.has_masks() and preds.has_masks():
+				mode = TIDE.MASK 
+			else:
+				mode = TIDE.BOX
 
 		run = TIDERun(gt, preds, pos_thresh, bg_thresh, mode, gt.max_dets, use_for_errors)
 
@@ -167,7 +174,7 @@ class TIDE:
 		
 		self.__calculate_summary()
 
-	def evaluate_multiple_models(self, gt:Data, preds_list:list, mode:str=None, names:list[str]=None):
+	def evaluate_multiple_models_on_one_gt(self, gt:Data, preds_list:list, mode:str=None, names:list[str]=None):
 		"""
 		Evaluate multiple prediction sets against a ground truth set.
 		preds_list: List of Data objects containing predictions
@@ -183,7 +190,7 @@ class TIDE:
 		
 		self.__calculate_summary()
 	
-	def evaluate_model_on_multiple_gt(self, gt_list:list[Data], preds_list:list[Data], mode=None, names:list[str]=None):
+	def evaluate_model_on_multiple_gt(self, gt_list:list[Data], preds_list:list[Data], mode:str=None, name:str=None):
 		"""
 		Evaluate prediction against multiple ground truth set.
 		preds_list: List of Data objects containing predictions on multiple GTs
@@ -191,17 +198,15 @@ class TIDE:
 		mode: 	 	Evaluation mode (box or mask), Either str or list of str
 		names:      List of names for the prediction sets. If None, will use preds.name
 		"""
-		if names is None:
-			names = [preds.name for preds in preds_list]
-		elif len(names) != len(preds_list):
-			raise ValueError("Length of names must match length of preds_list")
+		if name is None:
+			name = preds_list[0].name
 		
 		if isinstance(mode, str):
 			mode = [mode] * len(preds_list)
 		
-		for gt_counter, (gt, preds, name, mode_type) in enumerate(zip(gt_list, preds_list, names, mode)):
+		for gt_counter, (gt, preds) in enumerate(zip(gt_list, preds_list)):
 			run_name = name + f"_GT_num_{gt_counter}"
-			self.evaluate(gt, preds, mode=mode_type, name=run_name)
+			self.evaluate(gt, preds, name=run_name)
 		
 		self.__calculate_summary()
 		self.average_out_summary()
