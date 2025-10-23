@@ -9,6 +9,8 @@ from collections import defaultdict, OrderedDict
 import numpy as np
 from typing import Union
 
+from tidecv.errors import qualifiers
+
 class TIDEExample:
 	""" Computes all the data needed to evaluate a set of predictions and gt for a single image. """
 	def __init__(self, preds:list, gt:list, pos_thresh:float, mode:str, max_dets:int, run_errors:bool=True):
@@ -154,31 +156,64 @@ class TIDERun:
 		self._run()
 
 	def _compute_confusion_matrix(self):
-		y_true, y_pred = [], []
-		gt_lookup = {g['_id']: g for g in self.gt.annotations}
+		classes = sorted(self.gt.classes.keys())
+		num_classes = len(classes)
+		class_to_idx = {cls: i for i, cls in enumerate(classes)}
+		bg_idx = num_classes  # Hintergrundklasse
 
-		for pred in self.preds.annotations:
-			if pred.get('used') is True:
-				gt = gt_lookup.get(pred.get('matched_with'))
-				if gt:
-					y_true.append(gt['class'])
-					y_pred.append(pred['class'])
-			elif pred.get('used') is False:
-				y_true.append(-1)
-				y_pred.append(pred['class'])
+		y_true_idx, y_pred_idx = [], []
 
-		for gt in self.gt.annotations:
-			if not gt['ignore'] and not gt.get('used', False):
-				y_true.append(gt['class'])
-				y_pred.append(-1)
+		# Map image_id → GT- und Pred-Objekte
+		gt_by_img = {img_id: self.gt.get(img_id) for img_id in self.gt.images}
+		pred_by_img = {img_id: self.preds.get(img_id) for img_id in self.preds.images}
 
-		if not y_true or not y_pred:
+		for img_id in gt_by_img:
+			gts = [g for g in gt_by_img[img_id] if not g["ignore"]]
+			preds = pred_by_img.get(img_id, [])
+			if len(gts) == 0 and len(preds) == 0:
+				continue
+
+			if len(gts) > 0 and len(preds) > 0:
+				# Berechne IoU für alle Paare im Bild
+				from pycocotools import mask as mask_utils
+				det_type = "bbox" if self.mode == "bbox" else "mask"
+				iou_matrix = mask_utils.iou(
+					[p[det_type] for p in preds],
+					[g[det_type] for g in gts],
+					[False] * len(gts),
+				)
+
+				for p_idx, pred in enumerate(preds):
+					best_gt_idx = int(np.argmax(iou_matrix[p_idx]))
+					best_iou = iou_matrix[p_idx, best_gt_idx]
+
+					if best_iou >= self.pos_thresh:
+						gt_cls = gts[best_gt_idx]["class"]
+						pred_cls = pred["class"]
+						y_true_idx.append(class_to_idx[gt_cls])
+						y_pred_idx.append(class_to_idx[pred_cls])
+					else:
+						# False positive
+						y_true_idx.append(bg_idx)
+						y_pred_idx.append(class_to_idx[pred["class"]])
+			else:
+				# Kein GT im Bild → alle Preds = False Positives
+				for pred in preds:
+					y_true_idx.append(bg_idx)
+					y_pred_idx.append(class_to_idx[pred["class"]])
+				# Kein Pred im Bild → alle GTs = False Negatives
+				for gt in gts:
+					y_true_idx.append(class_to_idx[gt["class"]])
+					y_pred_idx.append(bg_idx)
+
+		if not y_true_idx:
 			return
 
-		classes = sorted(list(self.gt.classes.keys()))
-		cm = confusion_matrix(y_true, y_pred, labels=classes, normalize='true')
+		labels = list(range(num_classes)) + [bg_idx]
+		cm = confusion_matrix(y_true_idx, y_pred_idx, labels=labels, normalize="true")
 		self.confusion_matrix = cm
-		self.class_labels = classes
+		self.class_labels = list(self.gt.classes.values()) + ["background"]
+
 
 
 	def _run(self):
@@ -205,6 +240,16 @@ class TIDERun:
 		
 		self.ap = self.ap_data.get_mAP()
 		self._compute_confusion_matrix()
+
+		self.precision_per_class = {}
+		self.recall_per_class = {}
+		self.ap_per_class = {}
+
+		for cls_id, ap_obj in self.ap_data.objs.items():
+			self.precision_per_class[self.gt.classes[cls_id]] = round(ap_obj.get_precision() * 100, 2)
+			self.recall_per_class[self.gt.classes[cls_id]] = round(ap_obj.get_recall() * 100, 2)
+			self.ap_per_class[self.gt.classes[cls_id]] = round(ap_obj.get_ap(), 2)
+
 		self._clear()
 
 	def _clear(self):

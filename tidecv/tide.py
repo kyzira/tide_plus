@@ -92,7 +92,9 @@ class TIDE:
 				else:
 					run_summary["Special Errors"][key] = 0.0
 
-
+			run_summary["Per-Class Precision"] = run.precision_per_class
+			run_summary["Per-Class Recall"] = run.recall_per_class
+			run_summary["Per-Class AP"] = run.ap_per_class
 			
 			self.summary[run_name] = run_summary.copy()
 
@@ -155,6 +157,9 @@ class TIDE:
 				print("Type Mismatch! Can not average out the summaries.")
 
 		self.summary["Combined Average"] = averaged_summary.copy()
+
+		self.average_out_confusion_matrices()
+
 
 	def evaluate(self, gt:Data, preds:Data, mode:str=None, name:str=None):
 		"""

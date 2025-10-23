@@ -6,9 +6,14 @@ def _area(x):
 	if x is None:
 		return 0
 	# Wenn bbox vorhanden ist
-	if x.get('bbox') is not None:
+	if x.get('bbox') is not None and len(x['bbox']) >= 4:
 		b = x['bbox']
-		return b[2] * b[3]
+		try:
+			return b[2] * b[3]
+		except Exception:
+			print(f"Fehler bei der Berechnung der Fläche für bbox: {b}")
+			print(Exception)
+			return 0
 	# Wenn Maske vorhanden ist (z. B. bei Segmentation)
 	if x.get('mask') is not None:
 		import pycocotools.mask as mask_utils
