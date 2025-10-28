@@ -42,7 +42,7 @@ class TIDE:
 
 		self.qualifiers = OrderedDict()
 
-		self.COCO_THRESHOLDS = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+		self.COCO_THRESHOLDS = [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
 
 	def __calculate_summary(self):
 		main_errors = self.get_main_errors()
@@ -52,7 +52,7 @@ class TIDE:
 			run_summary = {}
 			if run_name in self.run_thresholds:
 				thresh_runs = self.run_thresholds[run_name]
-				aps = [trun.ap for trun in thresh_runs]
+				aps = [trun.ap for trun in thresh_runs if trun.pos_thresh >= 0.5 and trun.pos_thresh <= 0.95]
 				
 				run_summary["mAP 50:95"] = sum(aps)/len(aps)
 
@@ -139,8 +139,9 @@ class TIDE:
 				elif isinstance(category_value, dict):
 					if category_name not in averaged_summary:
 						averaged_summary[category_name] = {name: 0.0 for name in category_value.keys()}
+
 					for name, value in category_value.items():
-						averaged_summary[category_name][name] += float(value)
+						averaged_summary[category_name][name] = float(value) + averaged_summary[category_name].get(name, 0)
 				else:
 					print("Type Mismatch! Can not average out the summaries.")
 					break
