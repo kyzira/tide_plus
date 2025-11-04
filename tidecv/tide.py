@@ -50,52 +50,57 @@ class TIDE:
 
 		for run_name, run in self.runs.items():
 			run_summary = {}
-			if run_name in self.run_thresholds:
-				thresh_runs = self.run_thresholds[run_name]
-				aps = [trun.ap for trun in thresh_runs if trun.pos_thresh >= 0.5 and trun.pos_thresh <= 0.95]
-				
-				run_summary["mAP 50:95"] = sum(aps)/len(aps)
+			thresh_runs = self.run_thresholds.get(run_name, [])
+			aps = [trun.ap for trun in thresh_runs if 0.5 <= trun.pos_thresh <= 0.95]
+			run_summary["mAP 50:95"] = sum(aps) / len(aps) if aps else 0.0
 
-				run_summary['Threshold AP @'] = {}
-				for trun in thresh_runs:
-					run_summary['Threshold AP @'][str(int(trun.pos_thresh*100))] = round(trun.ap, 2)
+			run_summary["Threshold AP @"] = {
+				str(int(trun.pos_thresh * 100)): round(trun.ap, 2)
+				for trun in thresh_runs
+			}
 
-				# --- Precision / Recall (gesamt) ---
 			run_summary["Precision"] = {"Average": round(run.ap_data.get_precision() * 100, 2)}
 			run_summary["Recall"] = {"Average": round(run.ap_data.get_recall() * 100, 2)}
 
-			# --- AP / AR für Small, Medium, Large ---
-			size_quals = {
-				"Small": AREA[0],
-				"Medium": AREA[1],
-				"Large": AREA[2],
-			}
-
+			size_quals = {"Small": AREA[0], "Medium": AREA[1], "Large": AREA[2]}
 			for size_name, qual in size_quals.items():
 				ap_data = run.apply_qualifier(qual)
 				run_summary["Precision"][f"AP ({size_name})"] = round(ap_data.get_mAP(), 2)
 				run_summary["Recall"][f"AR ({size_name})"] = round(ap_data.get_recall() * 100, 2)
 
-			run_summary["Main Errors"] = {}
-			for err in self._error_types:
-				key = err.short_name if hasattr(err, "short_name") else str(err)
-				if key in main_errors[run_name]:
-					run_summary["Main Errors"][key] = round(main_errors[run_name][key], 2)
-				else:
-					run_summary["Main Errors"][key] = 0.0
-
-			run_summary["Special Errors"] = {}
-			for err in self._special_error_types:
-				key = err.short_name if hasattr(err, "short_name") else str(err)
-				if key in special_errors[run_name]:
-					run_summary["Special Errors"][key] = round(special_errors[run_name][key], 2)
-				else:
-					run_summary["Special Errors"][key] = 0.0
+			run_summary["Main Errors"] = {
+				(err.short_name if hasattr(err, "short_name") else str(err)): 
+				round(main_errors[run_name].get(err.short_name if hasattr(err, "short_name") else str(err), 0.0), 2)
+				for err in self._error_types
+			}
+			run_summary["Special Errors"] = {
+				(err.short_name if hasattr(err, "short_name") else str(err)): 
+				round(special_errors[run_name].get(err.short_name if hasattr(err, "short_name") else str(err), 0.0), 2)
+				for err in self._special_error_types
+			}
 
 			run_summary["Per-Class Precision"] = run.precision_per_class
 			run_summary["Per-Class Recall"] = run.recall_per_class
 			run_summary["Per-Class AP"] = run.ap_per_class
-			
+
+			# --- Per-class mAP @50 und mAP @50–95 ---
+			per_class_map_50 = {}
+			per_class_map_50_95 = {}
+			for cls_name in run.gt.classes.values():
+				aps_at_thresh = [
+					(trun.pos_thresh, trun.ap_per_class[cls_name])
+					for trun in thresh_runs
+					if hasattr(trun, "ap_per_class") and cls_name in trun.ap_per_class
+				]
+				ap_50 = next((ap for t, ap in aps_at_thresh if abs(t - 0.5) < 1e-6), 0.0)
+				aps_range = [ap for t, ap in aps_at_thresh if 0.5 <= t <= 0.95]
+				ap_50_95 = sum(aps_range) / len(aps_range) if aps_range else 0.0
+				per_class_map_50[cls_name] = round(ap_50, 2)
+				per_class_map_50_95[cls_name] = round(ap_50_95, 2)
+
+			run_summary["Per-Class mAP 50"] = per_class_map_50
+			run_summary["Per-Class mAP 50:95"] = per_class_map_50_95
+
 			self.summary[run_name] = run_summary.copy()
 
 	def __evaluate_run(self, gt:Data, preds:Data, pos_threshold:float=None, background_threshold:float=None,
