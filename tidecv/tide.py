@@ -132,37 +132,47 @@ class TIDE:
 		return avg_cm
 
 	def average_out_summary(self):
-		all_summary = self.get_summary()
-		averaged_summary = {}
+		# Never fold a previous "Combined Average" back into the mean.
+		all_summary = {k: v for k, v in self.get_summary().items() if k != "Combined Average"}
+		if not all_summary:
+			return
+
+		def is_num(x):
+			return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+		# Accumulate sums and matching counts so each key is divided only by the
+		# number of runs that actually reported it (per-class dicts can differ).
+		sums = {}
+		counts = {}
 
 		for summary in all_summary.values():
 			for category_name, category_value in summary.items():
-				if isinstance(category_value, float):
-					if category_name not in averaged_summary:
-						averaged_summary[category_name] = 0.0
-					averaged_summary[category_name] += float(category_value)
+				if is_num(category_value):
+					sums[category_name] = sums.get(category_name, 0.0) + float(category_value)
+					counts[category_name] = counts.get(category_name, 0) + 1
 				elif isinstance(category_value, dict):
-					if category_name not in averaged_summary:
-						averaged_summary[category_name] = {name: 0.0 for name in category_value.keys()}
-
+					cat_sum = sums.setdefault(category_name, {})
+					cat_cnt = counts.setdefault(category_name, {})
+					if not isinstance(cat_sum, dict):
+						continue  # category has conflicting types across runs; skip
 					for name, value in category_value.items():
-						averaged_summary[category_name][name] = float(value) + averaged_summary[category_name].get(name, 0)
-				else:
-					print("Type Mismatch! Can not average out the summaries.")
-					break
-		
-		div_factor = len(all_summary.values())
+						if is_num(value):
+							cat_sum[name] = cat_sum.get(name, 0.0) + float(value)
+							cat_cnt[name] = cat_cnt.get(name, 0) + 1
+				# non-numeric scalars (e.g. strings) are ignored
 
-		for category_name, category_value in averaged_summary.items():
-			if isinstance(category_value, float):
-				averaged_summary[category_name] = round(float(averaged_summary[category_name]) / div_factor, 2)
-			elif isinstance(category_value, dict):
-				for name, value in category_value.items():
-					averaged_summary[category_name][name] = round(float(averaged_summary[category_name][name]) / div_factor, 2)
-			else:
-				print("Type Mismatch! Can not average out the summaries.")
+		averaged_summary = {}
+		for category_name, cat_sum in sums.items():
+			cat_cnt = counts[category_name]
+			if isinstance(cat_sum, dict):
+				averaged_summary[category_name] = {
+					name: round(cat_sum[name] / cat_cnt[name], 2)
+					for name in cat_sum if cat_cnt.get(name)
+				}
+			elif cat_cnt:
+				averaged_summary[category_name] = round(cat_sum / cat_cnt, 2)
 
-		self.summary["Combined Average"] = averaged_summary.copy()
+		self.summary["Combined Average"] = averaged_summary
 
 		self.average_out_confusion_matrices()
 
@@ -298,11 +308,15 @@ class TIDE:
 				], title='Special Errors')
 
 			if "Precision" in run_summary and "Recall" in run_summary:
-				print(f"Precision: {float(run_summary["Precision"]["Average"]):.2f} | Recall: {float(run_summary["Recall"]["Average"]):.2f}")
+				prec = float(run_summary["Precision"]["Average"])
+				rec = float(run_summary["Recall"]["Average"])
+				print("Precision: {:.2f} | Recall: {:.2f}".format(prec, rec))
 			for size in ["Small", "Medium", "Large"]:
 				ap_key, ar_key = f"AP ({size})", f"AR ({size})"
 				if ap_key in run_summary["Precision"] and ar_key in run_summary["Recall"]:
-					print(f"{ap_key}: {run_summary["Precision"][ap_key]} | {ar_key}: {run_summary["Recall"][ar_key]}")
+					print("{}: {} | {}: {}".format(
+						ap_key, run_summary["Precision"][ap_key],
+						ar_key, run_summary["Recall"][ar_key]))
 
 			print()
 
@@ -319,10 +333,25 @@ class TIDE:
 		Plots a summary model for each run in the summary.
 		Images will be outputted to out_dir, which will be created if it doesn't exist.
 		"""
+		from .plotter import Plotter
+
 		if out_dir is None:
-			out_dir = os.path.join(os.getcwd())
-		
-		f.plot(self.summary, out_dir)
+			out_dir = os.getcwd()
+
+		# Confusion matrices are stored on the runs, not in the summary dict, so
+		# inject them here to a shallow copy so Plotter can render them too.
+		data = {name: dict(run_summary) for name, run_summary in self.summary.items()}
+		for run_name, run in self.runs.items():
+			if run_name in data and hasattr(run, "confusion_matrix"):
+				data[run_name]["confusion_matrix"] = run.confusion_matrix.tolist()
+				data[run_name]["class_labels"]     = run.class_labels
+		if hasattr(self, "avg_confusion_matrix") and "Combined Average" in data:
+			data["Combined Average"]["confusion_matrix"] = self.avg_confusion_matrix.tolist()
+			data["Combined Average"]["class_labels"]     = list(self.runs.values())[0].class_labels
+
+		os.makedirs(out_dir, exist_ok=True)
+		Plotter._plot_single(data, out_dir)
+		print("Plots saved!")
 	
 
 

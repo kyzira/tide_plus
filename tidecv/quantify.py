@@ -167,42 +167,53 @@ class TIDERun:
 		gt_by_img = {img_id: self.gt.get(img_id) for img_id in self.gt.images}
 		pred_by_img = {img_id: self.preds.get(img_id) for img_id in self.preds.images}
 
+		det_type = "bbox" if self.mode == "bbox" else "mask"
+
 		for img_id in gt_by_img:
 			gts = [g for g in gt_by_img[img_id] if not g["ignore"]]
 			preds = pred_by_img.get(img_id, [])
 			if len(gts) == 0 and len(preds) == 0:
 				continue
 
+			# Consider predictions in descending confidence so the greedy matcher
+			# claims each GT with the most confident detection first.
+			preds = sorted(preds, key=lambda p: -p["score"])
+
+			# IoU is [len(preds), len(gts)]; empty when either side is empty.
 			if len(gts) > 0 and len(preds) > 0:
-				# Berechne IoU für alle Paare im Bild
-				from pycocotools import mask as mask_utils
-				det_type = "bbox" if self.mode == "bbox" else "mask"
 				iou_matrix = mask_utils.iou(
 					[p[det_type] for p in preds],
 					[g[det_type] for g in gts],
 					[False] * len(gts),
 				)
-
-				for p_idx, pred in enumerate(preds):
-					best_gt_idx = int(np.argmax(iou_matrix[p_idx]))
-					best_iou = iou_matrix[p_idx, best_gt_idx]
-
-					if best_iou >= self.pos_thresh:
-						gt_cls = gts[best_gt_idx]["class"]
-						pred_cls = pred["class"]
-						y_true_idx.append(class_to_idx[gt_cls])
-						y_pred_idx.append(class_to_idx[pred_cls])
-					else:
-						# False positive
-						y_true_idx.append(bg_idx)
-						y_pred_idx.append(class_to_idx[pred["class"]])
 			else:
-				# Kein GT im Bild → alle Preds = False Positives
-				for pred in preds:
+				iou_matrix = None
+
+			matched_gt = set()  # GT indices already claimed (enforces one-to-one)
+
+			for p_idx, pred in enumerate(preds):
+				best_gt_idx, best_iou = -1, 0.0
+				if iou_matrix is not None:
+					for g_idx in range(len(gts)):
+						if g_idx in matched_gt:
+							continue
+						iou = iou_matrix[p_idx, g_idx]
+						if iou > best_iou:
+							best_iou, best_gt_idx = iou, g_idx
+
+				if best_gt_idx >= 0 and best_iou >= self.pos_thresh:
+					# True match: record (true class, predicted class)
+					matched_gt.add(best_gt_idx)
+					y_true_idx.append(class_to_idx[gts[best_gt_idx]["class"]])
+					y_pred_idx.append(class_to_idx[pred["class"]])
+				else:
+					# False positive: predicted an object where there is no (free) GT
 					y_true_idx.append(bg_idx)
 					y_pred_idx.append(class_to_idx[pred["class"]])
-				# Kein Pred im Bild → alle GTs = False Negatives
-				for gt in gts:
+
+			# Every GT left unmatched is a false negative (missed detection)
+			for g_idx, gt in enumerate(gts):
+				if g_idx not in matched_gt:
 					y_true_idx.append(class_to_idx[gt["class"]])
 					y_pred_idx.append(bg_idx)
 

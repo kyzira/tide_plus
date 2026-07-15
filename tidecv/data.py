@@ -104,16 +104,17 @@ class Data():
 		self.images[id]['name'] = name
 
 	def has_masks(self) -> bool:
-		"""Returns True only if there is at least one valid COCO-style or polygon mask."""
+		"""Returns True if there is at least one valid mask: a COCO RLE dict or a polygon list."""
 		for ann in self.annotations:
 			m = ann.get('mask', None)
-			if m is None:
+			if not m:  # None, empty dict, or empty list
 				continue
-			if not m:
-				continue
-			if isinstance(m, dict) and m.get("counts", False) and m.get('size', False):
-				if len(m.get("counts", None)) != 0:
+			# COCO RLE: dict with non-empty 'counts' and a 'size'
+			if isinstance(m, dict):
+				if m.get('counts') and m.get('size'):
 					return True
+			# Polygon: a non-empty list (of points or list-of-lists)
+			elif isinstance(m, (list, tuple)):
 				return True
 		return False
 

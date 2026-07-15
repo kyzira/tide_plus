@@ -4,3 +4,4 @@ from .tide import *
 from .errors.qualifiers import *
 from . import datasets
 from . import plotter
+from . import adapters
