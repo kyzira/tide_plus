@@ -23,12 +23,23 @@ dependencies = [
     "numpy",
     "pycocotools",
     "opencv-python",
+    "pillow",
     "seaborn",
     "pandas",
     "matplotlib",
     "scikit-learn",
     "psutil"
 ]
+
+[project.optional-dependencies]
+# Live YOLO / RF-DETR adapters (running the models, not just reading their output files)
+yolo = ["ultralytics"]
+rfdetr = ["rfdetr", "supervision"]
+# Interactive SAM click benchmark. Real inference also needs the sam3_labeling repo on
+# the path (SAM3_LABELING_ROOT) plus its SAM weights; torch should match your CUDA.
+interactive = ["torch", "transformers>=5.13"]
+# Test suite
+test = ["pytest"]
 
 [project.urls]
 Homepage = "https://github.com/kyzira/tide-plus"
@@ -37,4 +48,4 @@ Homepage = "https://github.com/kyzira/tide-plus"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["tidecv", "tidecv.errors"]
+include = ["tidecv*"]
