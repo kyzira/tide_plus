@@ -14,9 +14,16 @@
 > - ✅ `tidecv/adapters/` built: `base`, `coco`, `yolo` (label-dir + live model),
 >   `rfdetr` (detections/json/live). YOLO validated on the real GT folder (167/167
 >   annotations aligned, polygon→RLE correct).
-> - ⏳ Next: SAM adapter + `tidecv/interactive/` click benchmark (reuse
->   `sam3_labeling` `SamBackend`); remaining fixes #8; measurement transparency;
->   repo hygiene (untrack `build/`, `*.egg-info/`, `__pycache__/`).
+> - ✅ `tidecv/interactive/` click benchmark built: `gt_masks` (GT→per-instance
+>   masks), `clicker` (deterministic robot-user), `sam_model` (`Sam3LabelingModel`
+>   reusing `sam3_labeling`'s `SamBackend`, + `DiskModel` stand-in), `evaluate`
+>   (`InteractiveEvaluator` → NoC@IoU / NoF / IoU-curve / per-class), `report`
+>   (plots). Runnable CLI at `examples/run_click_benchmark.py`. Harness validated
+>   end-to-end on the real GT; `Sam3LabelingModel` import wiring verified against the
+>   real repo. 24 tests total, all passing.
+> - ⏳ Next: run the real SAM2/SAM3 comparison on the GPU box; remaining fix #8
+>   (perf); measurement transparency; repo hygiene (untrack `build/`,
+>   `*.egg-info/`, `__pycache__/`).
 
 ---
 
